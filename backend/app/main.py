@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import uuid
 from pathlib import Path
 from typing import List, Literal
@@ -11,7 +12,7 @@ import numpy as np
 import pytesseract
 from docx import Document
 from docx.shared import Pt
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from PIL import Image as PILImage
@@ -55,6 +56,40 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+
+client_logger = logging.getLogger("grd_job_scan.client")
+client_logger.setLevel(logging.INFO)
+if not client_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s [client] %(message)s", "%H:%M:%S"))
+    client_logger.addHandler(_handler)
+    client_logger.propagate = False
+
+
+def identify_client(user_agent: str) -> str:
+    """Best-effort label for the server log: 'app' (Expo/React Native) or 'web' (a browser)."""
+    ua = user_agent.lower()
+    if any(token in ua for token in ("expo", "okhttp", "cfnetwork", "reactnative")):
+        return "app"
+    if any(token in ua for token in ("mozilla", "chrome", "safari", "firefox", "edg/")):
+        return "web"
+    return "unknown"
+
+
+@app.middleware("http")
+async def log_client_source(request: Request, call_next):
+    # Only worth logging for the file-upload / write endpoints; keep it quiet elsewhere.
+    if request.url.path in ("/api/scan", "/api/parse", "/api/export"):
+        ua = request.headers.get("user-agent", "")
+        client_logger.info(
+            "%s %s from %s -> %s (User-Agent: %s)",
+            request.method,
+            request.url.path,
+            request.client.host if request.client else "?",
+            identify_client(ua),
+            ua or "(none)",
+        )
+    return await call_next(request)
 
 
 class ExportPage(BaseModel):
