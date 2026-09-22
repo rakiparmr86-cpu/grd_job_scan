@@ -8,8 +8,8 @@ from typing import List, Literal
 from xml.sax.saxutils import escape as xml_escape
 
 import cv2
+import easyocr
 import numpy as np
-import pytesseract
 from docx import Document
 from docx.shared import Pt
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -40,6 +40,13 @@ SCAN_DIR = BASE_DIR / "data" / "scans"
 EXPORT_DIR = BASE_DIR / "data" / "exports"
 SCAN_DIR.mkdir(parents=True, exist_ok=True)
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Loaded once at startup (not per request): EasyOCR downloads its model weights
+# to ~/.EasyOCR on first run and keeps them in memory. English handwriting only,
+# per current requirements -- add other language codes here to support more.
+# verbose=False: EasyOCR's download progress bar uses a Unicode block character
+# that crashes on Windows consoles using the cp1252 codepage.
+_ocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
 
 app = FastAPI(
     title="Job Scan API",
@@ -183,22 +190,6 @@ def smart_crop(image: np.ndarray) -> np.ndarray:
     return four_point_transform(original, page)
 
 
-def rotate_by_osd(image: np.ndarray) -> np.ndarray:
-    try:
-        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        osd = pytesseract.image_to_osd(rgb, output_type=pytesseract.Output.DICT)
-        rotate = int(osd.get("rotate", 0))
-        if rotate == 90:
-            return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-        if rotate == 180:
-            return cv2.rotate(image, cv2.ROTATE_180)
-        if rotate == 270:
-            return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    except Exception:
-        pass
-    return image
-
-
 def enhance_document(image: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
@@ -214,9 +205,11 @@ def enhance_document(image: np.ndarray) -> np.ndarray:
 
 
 def run_ocr(image: np.ndarray, language: str) -> str:
+    # `language` is accepted for API compatibility but currently ignored: the
+    # EasyOCR reader is loaded once at startup for English only (see _ocr_reader).
     rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    config = "--oem 3 --psm 6"
-    return pytesseract.image_to_string(rgb, lang=language, config=config).strip()
+    lines = _ocr_reader.readtext(rgb, detail=0, paragraph=True)
+    return "\n\n".join(lines).strip()
 
 
 def decode_upload(raw: bytes) -> np.ndarray:
@@ -241,25 +234,16 @@ def health():
 
 
 def process_image(raw: bytes, language: str):
-    """Crop, orient, enhance and OCR an image. Returns (enhanced_image, text)."""
+    """Crop, enhance and OCR an image. Returns (enhanced_image, text)."""
     image = decode_upload(raw)
 
     cropped = smart_crop(image)
-    oriented = rotate_by_osd(cropped)
-    enhanced = enhance_document(oriented)
+    enhanced = enhance_document(cropped)
 
     try:
         text = run_ocr(enhanced, language)
-    except pytesseract.TesseractNotFoundError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Tesseract OCR is not installed on the backend server.",
-        ) from exc
-    except pytesseract.TesseractError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"OCR failed. Check installed language packs. Details: {exc}",
-        ) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"OCR failed. Details: {exc}") from exc
     return enhanced, text
 
 

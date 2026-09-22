@@ -18,7 +18,6 @@ const BRAND = '#2C2E3E';
 const ACCENT = '#5B6472';
 
 export default function ParseScreen() {
-  const [language, setLanguage] = useState('eng');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [format, setFormat] = useState('word');
@@ -39,7 +38,7 @@ export default function ParseScreen() {
       setBusy(true);
       setResult(null);
       const file = picked.assets[0];
-      const data = await parseFile(file, language);
+      const data = await parseFile(file);
       setResult(data);
     } catch (error) {
       Alert.alert('Parse failed', error.message || 'Could not parse this file.');
@@ -69,22 +68,6 @@ export default function ParseScreen() {
         <Text style={styles.help}>
           Send a text, Word (.docx), PDF or image file to the API and get its text back.
         </Text>
-
-        <Text style={styles.label}>OCR language (images only)</Text>
-        <View style={styles.langRow}>
-          {[
-            ['eng', 'English'],
-            ['eng+hin', 'English + Hindi'],
-          ].map(([value, label]) => (
-            <Pressable
-              key={value}
-              style={[styles.chip, language === value && styles.chipActive]}
-              onPress={() => setLanguage(value)}
-            >
-              <Text style={[styles.chipText, language === value && { color: '#fff' }]}>{label}</Text>
-            </Pressable>
-          ))}
-        </View>
 
         <Pressable
           onPress={pickAndParse}
@@ -141,16 +124,6 @@ const styles = StyleSheet.create({
   sectionTitle: { color: BRAND, fontSize: 18, fontWeight: '800', marginBottom: 6 },
   help: { color: '#666B78', lineHeight: 20 },
   label: { marginTop: 14, marginBottom: 7, color: BRAND, fontWeight: '700' },
-  langRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  chip: {
-    borderWidth: 1,
-    borderColor: '#D7D9E0',
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-  },
-  chipActive: { backgroundColor: BRAND, borderColor: BRAND },
-  chipText: { color: BRAND, fontWeight: '700' },
   button: {
     marginTop: 16,
     minHeight: 48,

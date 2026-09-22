@@ -58,7 +58,6 @@ function ScanScreen() {
   const [pages, setPages] = useState([]);
   const [busy, setBusy] = useState(false);
   const [title, setTitle] = useState('Job Scan');
-  const [language, setLanguage] = useState('eng');
   const [format, setFormat] = useState('word');
   const [pendingAsset, setPendingAsset] = useState(null);
 
@@ -99,7 +98,7 @@ function ScanScreen() {
   const uploadScan = async (asset) => {
     setBusy(true);
     try {
-      const data = await scanDocument(asset, language);
+      const data = await scanDocument(asset);
 
       setPages((current) => [
         ...current,
@@ -185,22 +184,6 @@ function ScanScreen() {
               <View style={styles.half}>
                 <ActionButton title="Import Photo" onPress={() => selectImage('library')} secondary disabled={busy} />
               </View>
-            </View>
-
-            <Text style={styles.label}>OCR language</Text>
-            <View style={styles.langRow}>
-              <Pressable
-                style={[styles.langChip, language === 'eng' && styles.langChipActive]}
-                onPress={() => setLanguage('eng')}
-              >
-                <Text style={[styles.langText, language === 'eng' && styles.langTextActive]}>English</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.langChip, language === 'eng+hin' && styles.langChipActive]}
-                onPress={() => setLanguage('eng+hin')}
-              >
-                <Text style={[styles.langText, language === 'eng+hin' && styles.langTextActive]}>English + Hindi</Text>
-              </Pressable>
             </View>
 
             {busy && (
@@ -348,18 +331,6 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.45 },
   buttonText: { color: '#fff', fontWeight: '800', textAlign: 'center' },
   label: { marginTop: 12, marginBottom: 7, color: BRAND, fontWeight: '700' },
-  langRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  langChip: {
-    borderWidth: 1,
-    borderColor: '#D7D9E0',
-    backgroundColor: '#fff',
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-  },
-  langChipActive: { backgroundColor: BRAND, borderColor: BRAND },
-  langText: { color: BRAND, fontWeight: '700' },
-  langTextActive: { color: '#fff' },
   processing: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 12 },
   processingText: { color: '#666B78' },
   pageBox: {

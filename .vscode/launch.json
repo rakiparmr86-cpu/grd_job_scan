@@ -10,7 +10,7 @@
       "cwd": "${workspaceFolder}/backend",
       "python": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
       "env": {
-        "PATH": "C:\\Program Files\\Tesseract-OCR;${env:PATH}"
+        "PYTHONIOENCODING": "utf-8"
       },
       "justMyCode": true,
       "console": "integratedTerminal"
@@ -24,7 +24,7 @@
       "cwd": "${workspaceFolder}/backend",
       "python": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
       "env": {
-        "PATH": "C:\\Program Files\\Tesseract-OCR;${env:PATH}"
+        "PYTHONIOENCODING": "utf-8"
       },
       "justMyCode": true,
       "console": "integratedTerminal"

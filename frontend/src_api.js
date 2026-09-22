@@ -69,9 +69,11 @@ export function checkHealth() {
 export const login = (username, password) => jsonPost('/api/auth/login', { username, password });
 export const register = (username, password) => jsonPost('/api/auth/register', { username, password });
 
-async function fileForm(file, language) {
+async function fileForm(file) {
   const form = new FormData();
-  form.append('language', language);
+  // The backend's OCR engine (EasyOCR) is English-only for now; this field is
+  // kept only because the API still accepts it for compatibility.
+  form.append('language', 'eng');
 
   if (Platform.OS === 'web') {
     if (file.file) {
@@ -98,15 +100,15 @@ async function fileForm(file, language) {
 }
 
 // asset: an expo-image-picker asset. Returns { scan_id, text, image_url }.
-export async function scanDocument(asset, language = 'eng') {
+export async function scanDocument(asset) {
   // Do not set Content-Type manually; fetch adds the multipart boundary.
-  const body = await fileForm({ ...asset, mimeType: asset.mimeType || 'image/jpeg' }, language);
+  const body = await fileForm({ ...asset, mimeType: asset.mimeType || 'image/jpeg' });
   return request('/api/scan', { method: 'POST', body }, 120000);
 }
 
 // file: an expo-document-picker asset. Returns { filename, type, text, chars }.
-export async function parseFile(file, language = 'eng') {
-  const body = await fileForm(file, language);
+export async function parseFile(file) {
+  const body = await fileForm(file);
   return request('/api/parse', { method: 'POST', body }, 120000);
 }
 
