@@ -1,0 +1,30 @@
+# Personal/domain vocabulary for OCR correction.
+# One term or phrase per line. Lines starting with # are ignored.
+#
+# When TrOCR reads a line with low confidence (already shown as "[unclear]"),
+# the app tries to snap its guess to the closest entry here. It only touches
+# already-uncertain lines, and only when the match is close enough -- it never
+# overrides a confident reading. Add your own recurring words/phrases (terms
+# you use often that TrOCR keeps misreading) to improve future scans; each
+# addition only helps future low-confidence lines, it does not retrain anything.
+
+Conversion Rate
+Pipeline Buffer
+Required Pipeline
+Total Opening
+Opening Total
+Joined Total
+Avg Job Close Per month
+Total Jobs
+Month Count
+Ideal Capacity per Recruiter
+Pipeline Buffered
+Active Job
+Rounded Ideal Capacity
+Overutilized
+Balance
+Underutilized
+Recruiter
+Pipeline
+Buffer
+Capacity

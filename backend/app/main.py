@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import io
 import logging
 import uuid
@@ -40,8 +41,31 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", "
 BASE_DIR = Path(__file__).resolve().parent.parent
 SCAN_DIR = BASE_DIR / "data" / "scans"
 EXPORT_DIR = BASE_DIR / "data" / "exports"
+VOCAB_PATH = BASE_DIR / "data" / "vocabulary.txt"
 SCAN_DIR.mkdir(parents=True, exist_ok=True)
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_vocabulary() -> List[str]:
+    if not VOCAB_PATH.exists():
+        return []
+    words = []
+    for line in VOCAB_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            words.append(line)
+    return words
+
+
+# Re-read on every request (not cached): editing the file takes effect on the
+# next scan with no server restart needed, and the list is small (a text-file
+# read is cheap next to the OCR work already happening in the same request).
+def correct_with_vocabulary(text: str, cutoff: float = 0.6) -> str:
+    vocabulary = load_vocabulary()
+    if not vocabulary:
+        return text
+    match = difflib.get_close_matches(text, vocabulary, n=1, cutoff=cutoff)
+    return match[0] if match else text
 
 # Loaded once at startup (not per request), both kept in memory:
 #  - EasyOCR: used only for its text *detection* (finding line bounding boxes).
@@ -275,7 +299,10 @@ def run_ocr(image: np.ndarray, language: str) -> str:
         if not text or confidence < OCR_SKIP_CONFIDENCE:
             continue  # near-certainly a false-positive detection, not real text
         if confidence < OCR_FLAG_CONFIDENCE:
-            text = f"[unclear] {text}"
+            # Only touch text we already don't trust -- never override a
+            # confident reading. If no vocabulary entry is close enough,
+            # correct_with_vocabulary() just returns the text unchanged.
+            text = f"[unclear] {correct_with_vocabulary(text)}"
         lines.append((y_min, text))
 
     lines.sort(key=lambda item: item[0])  # top-to-bottom reading order
