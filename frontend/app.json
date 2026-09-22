@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "GRD Job Scan",
+    "slug": "grd-job-scan",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "GRD Job Scan uses the camera to scan documents.",
+        "NSPhotoLibraryUsageDescription": "GRD Job Scan uses your photo library to import documents."
+      }
+    },
+    "android": {
+      "permissions": [
+        "CAMERA"
+      ]
+    }
+  }
+}
