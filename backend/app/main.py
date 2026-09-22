@@ -14,17 +14,25 @@ from docx.shared import Pt
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from PIL import Image as PILImage
 from pydantic import BaseModel
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
 
+try:
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()  # lets Pillow open iPhone HEIC/HEIF photos
+except ImportError:
+    pillow_heif = None
+
 from app.auth import current_user, router as auth_router
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 TEXT_EXTENSIONS = {".txt", ".csv", ".md", ".json", ".log"}
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".heic", ".heif"}
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SCAN_DIR = BASE_DIR / "data" / "scans"
@@ -179,9 +187,17 @@ def run_ocr(image: np.ndarray, language: str) -> str:
 def decode_upload(raw: bytes) -> np.ndarray:
     arr = np.frombuffer(raw, np.uint8)
     image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if image is None:
-        raise HTTPException(status_code=400, detail="Unsupported or invalid image.")
-    return image
+    if image is not None:
+        return image
+
+    # OpenCV can't decode some formats phone cameras produce (notably HEIC/HEIF
+    # on iPhones). Pillow handles far more formats, and pillow-heif (if installed)
+    # adds HEIC/HEIF support specifically.
+    try:
+        pil_image = PILImage.open(io.BytesIO(raw)).convert("RGB")
+        return cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Unsupported or invalid image.") from exc
 
 
 @app.get("/health")
