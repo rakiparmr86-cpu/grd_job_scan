@@ -10,6 +10,7 @@ from xml.sax.saxutils import escape as xml_escape
 import cv2
 import easyocr
 import numpy as np
+import torch
 from docx import Document
 from docx.shared import Pt
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -21,6 +22,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
+from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 try:
     import pillow_heif
@@ -41,12 +43,23 @@ EXPORT_DIR = BASE_DIR / "data" / "exports"
 SCAN_DIR.mkdir(parents=True, exist_ok=True)
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Loaded once at startup (not per request): EasyOCR downloads its model weights
-# to ~/.EasyOCR on first run and keeps them in memory. English handwriting only,
-# per current requirements -- add other language codes here to support more.
-# verbose=False: EasyOCR's download progress bar uses a Unicode block character
-# that crashes on Windows consoles using the cp1252 codepage.
+# Loaded once at startup (not per request), both kept in memory:
+#  - EasyOCR: used only for its text *detection* (finding line bounding boxes).
+#    verbose=False avoids a Unicode progress-bar character that crashes on
+#    Windows consoles using the cp1252 codepage.
+#  - TrOCR: reads each detected line. It's a real vision+language transformer
+#    (trained on handwritten text), so it uses linguistic context to resolve
+#    ambiguous strokes -- e.g. it will read "Received" not "Recieved" -- unlike
+#    EasyOCR's CRNN recognizer, which matches character shapes with no
+#    language model behind it.
 _ocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+
+_TROCR_MODEL_NAME = "microsoft/trocr-base-handwritten"
+_trocr_processor = TrOCRProcessor.from_pretrained(_TROCR_MODEL_NAME)
+_trocr_model = VisionEncoderDecoderModel.from_pretrained(_TROCR_MODEL_NAME)
+_trocr_model.eval()
+
+MAX_OCR_LINES = 60  # safety cap so a noisy/busy photo can't stall a request for minutes
 
 app = FastAPI(
     title="Job Scan API",
@@ -204,12 +217,69 @@ def enhance_document(image: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
 
 
+# Below this, a "line" is almost always a false-positive detection (blank
+# paper, ruled-line noise) rather than real text with low-confidence reading:
+# skip it entirely rather than showing junk like "0 0".
+OCR_SKIP_CONFIDENCE = 0.30
+# Between skip and this, TrOCR's guess might be a hallucination (a fluent-
+# sounding but wrong word) rather than a genuine misread: keep the guess but
+# flag it so it's not silently trusted.
+OCR_FLAG_CONFIDENCE = 0.55
+
+
+def _read_line_with_confidence(crop: PILImage.Image) -> tuple[str, float]:
+    """Run TrOCR on one cropped line. Returns (text, mean token confidence 0-1)."""
+    pixel_values = _trocr_processor(images=crop, return_tensors="pt").pixel_values
+    with torch.no_grad():
+        out = _trocr_model.generate(
+            pixel_values, max_new_tokens=64, output_scores=True, return_dict_in_generate=True
+        )
+    text = _trocr_processor.batch_decode(out.sequences, skip_special_tokens=True)[0].strip()
+
+    # out.sequences includes the leading decoder-start token; out.scores has one
+    # entry per *generated* step, aligned with sequences[:, 1:].
+    tokenizer = _trocr_processor.tokenizer
+    gen_ids = out.sequences[0][1:]
+    step_probs = []
+    for step_logits, token_id in zip(out.scores, gen_ids):
+        if token_id.item() in (tokenizer.pad_token_id, tokenizer.eos_token_id):
+            continue
+        prob = torch.softmax(step_logits[0], dim=-1)[token_id].item()
+        step_probs.append(prob)
+    confidence = sum(step_probs) / len(step_probs) if step_probs else 0.0
+    return text, confidence
+
+
 def run_ocr(image: np.ndarray, language: str) -> str:
     # `language` is accepted for API compatibility but currently ignored: the
-    # EasyOCR reader is loaded once at startup for English only (see _ocr_reader).
+    # models loaded at startup are English only (see _ocr_reader / _trocr_model).
     rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    lines = _ocr_reader.readtext(rgb, detail=0, paragraph=True)
-    return "\n\n".join(lines).strip()
+    pil_image = PILImage.fromarray(rgb)
+
+    # EasyOCR just finds where each line of text is; recognition is TrOCR's job.
+    horizontal_list, _free_list = _ocr_reader.detect(rgb)
+    boxes = horizontal_list[0] if horizontal_list else []
+    if not boxes:
+        return ""
+
+    height, width = image.shape[:2]
+    lines: List[tuple[int, str]] = []
+    for x_min, x_max, y_min, y_max in boxes[:MAX_OCR_LINES]:
+        x_min, y_min = max(0, x_min), max(0, y_min)
+        x_max, y_max = min(width, x_max), min(height, y_max)
+        if x_max <= x_min or y_max <= y_min:
+            continue
+
+        crop = pil_image.crop((x_min, y_min, x_max, y_max))
+        text, confidence = _read_line_with_confidence(crop)
+        if not text or confidence < OCR_SKIP_CONFIDENCE:
+            continue  # near-certainly a false-positive detection, not real text
+        if confidence < OCR_FLAG_CONFIDENCE:
+            text = f"[unclear] {text}"
+        lines.append((y_min, text))
+
+    lines.sort(key=lambda item: item[0])  # top-to-bottom reading order
+    return "\n".join(text for _, text in lines).strip()
 
 
 def decode_upload(raw: bytes) -> np.ndarray:
