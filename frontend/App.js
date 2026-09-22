@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -19,16 +20,22 @@ import { API_BASE_URL } from './src_config';
 import {
   scanDocument,
   deleteScan,
-  exportWordDoc,
+  exportDocument,
   setAuthToken,
   setUnauthorizedHandler,
 } from './src_api';
-import { shareWordFile } from './src_share';
+import { shareExportedFile } from './src_share';
 import LoginScreen from './src_LoginScreen';
 import ParseScreen from './src_ParseScreen';
+import CropScreen from './src_CropScreen';
+import FormatPicker from './src_FormatPicker';
 
-const BRAND = '#2C2E3E';
-const ORANGE = '#F58220';
+const BRAND = '#2C2E3E'; // dark text/accent color, not a background anymore
+const ACCENT = '#5B6472';
+const PAGE_BG = '#F5F6F8';
+const HEADER_BG = '#FFFFFF';
+const BORDER = '#E2E4EA';
+const MUTED = '#666B78';
 
 function ActionButton({ title, onPress, secondary = false, disabled = false }) {
   return (
@@ -50,8 +57,10 @@ function ActionButton({ title, onPress, secondary = false, disabled = false }) {
 function ScanScreen() {
   const [pages, setPages] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [title, setTitle] = useState('GRD Job Scan');
+  const [title, setTitle] = useState('Job Scan');
   const [language, setLanguage] = useState('eng');
+  const [format, setFormat] = useState('word');
+  const [pendingAsset, setPendingAsset] = useState(null);
 
   const canExport = useMemo(() => pages.length > 0 && !busy, [pages, busy]);
 
@@ -80,7 +89,8 @@ function ScanScreen() {
       }
 
       if (result.canceled || !result.assets?.[0]) return;
-      await uploadScan(result.assets[0]);
+      // Show the crop screen first; uploadScan runs once the user confirms or skips it.
+      setPendingAsset(result.assets[0]);
     } catch (error) {
       Alert.alert('Image error', error.message || 'Could not open the image.');
     }
@@ -124,19 +134,20 @@ function ScanScreen() {
     }
   };
 
-  const exportWord = async () => {
+  const exportDoc = async () => {
     if (!pages.length) return;
 
     setBusy(true);
     try {
-      const data = await exportWordDoc(
+      const data = await exportDocument(
         title,
-        pages.map((page) => ({ scan_id: page.id, text: page.text }))
+        pages.map((page) => ({ scan_id: page.id, text: page.text })),
+        format
       );
 
-      await shareWordFile(data);
+      await shareExportedFile(data);
     } catch (error) {
-      Alert.alert('Export failed', error.message || 'Could not export Word document.');
+      Alert.alert('Export failed', error.message || 'Could not export the document.');
     } finally {
       setBusy(false);
     }
@@ -144,18 +155,18 @@ function ScanScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="light-content" backgroundColor={BRAND} />
+      <StatusBar barStyle="dark-content" backgroundColor={HEADER_BG} />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
-            <View style={styles.logoBox}>
+            {/* <View style={styles.logoBox}>
               <Text style={styles.logoText}>GRD</Text>
-            </View>
+            </View> */}
             <View style={styles.flex}>
-              <Text style={styles.appName}>GRD Job Scan</Text>
+              <Text style={styles.appName}>Job Scan</Text>
               <Text style={styles.subTitle}>Scan → Enhance → OCR → Edit → Word</Text>
             </View>
           </View>
@@ -232,7 +243,7 @@ function ScanScreen() {
           )}
 
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>3. Export to Word</Text>
+            <Text style={styles.sectionTitle}>3. Export</Text>
             <Text style={styles.label}>Document title</Text>
             <TextInput
               value={title}
@@ -240,7 +251,15 @@ function ScanScreen() {
               style={styles.titleInput}
               placeholder="Document title"
             />
-            <ActionButton title="Create & Share Word (.docx)" onPress={exportWord} disabled={!canExport} />
+            <Text style={styles.label}>Format</Text>
+            <FormatPicker value={format} onChange={setFormat} />
+            <View style={{ marginTop: 12 }}>
+              <ActionButton
+                title={`Create & Share ${format === 'pdf' ? 'PDF' : 'Word (.docx)'}`}
+                onPress={exportDoc}
+                disabled={!canExport}
+              />
+            </View>
           </View>
 
           <Text style={styles.footer}>
@@ -248,16 +267,39 @@ function ScanScreen() {
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={!!pendingAsset}
+        animationType="slide"
+        onRequestClose={() => setPendingAsset(null)}
+      >
+        {pendingAsset && (
+          <CropScreen
+            asset={pendingAsset}
+            onCancel={() => setPendingAsset(null)}
+            onSkip={(asset) => {
+              setPendingAsset(null);
+              uploadScan(asset);
+            }}
+            onDone={(asset) => {
+              setPendingAsset(null);
+              uploadScan(asset);
+            }}
+          />
+        )}
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: BRAND },
+  safe: { flex: 1, backgroundColor: PAGE_BG },
   flex: { flex: 1 },
-  container: { padding: 16, backgroundColor: '#F5F6F8', flexGrow: 1 },
+  container: { padding: 16, backgroundColor: PAGE_BG, flexGrow: 1 },
   header: {
-    backgroundColor: BRAND,
+    backgroundColor: HEADER_BG,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
     margin: -16,
     marginBottom: 16,
     paddingHorizontal: 18,
@@ -271,13 +313,13 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 14,
-    backgroundColor: ORANGE,
+    backgroundColor: ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
   },
   logoText: { color: '#fff', fontSize: 17, fontWeight: '800' },
-  appName: { color: '#fff', fontSize: 24, fontWeight: '800' },
-  subTitle: { color: '#D7D9E0', marginTop: 3, fontSize: 12 },
+  appName: { color: BRAND, fontSize: 24, fontWeight: '800' },
+  subTitle: { color: MUTED, marginTop: 3, fontSize: 12 },
   card: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -301,7 +343,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     marginVertical: 4,
   },
-  buttonPrimary: { backgroundColor: ORANGE },
+  buttonPrimary: { backgroundColor: ACCENT },
   buttonSecondary: { backgroundColor: '#ECEEF3', borderWidth: 1, borderColor: '#DADDE5' },
   buttonDisabled: { opacity: 0.45 },
   buttonText: { color: '#fff', fontWeight: '800', textAlign: 'center' },
@@ -386,7 +428,7 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="light-content" backgroundColor={BRAND} />
+      <StatusBar barStyle="dark-content" backgroundColor={HEADER_BG} />
       <View style={menuStyles.bar}>
         {TABS.map((item) => (
           <Pressable
@@ -424,9 +466,16 @@ export default function App() {
 }
 
 const menuStyles = StyleSheet.create({
-  bar: { flexDirection: 'row', backgroundColor: BRAND, paddingHorizontal: 8, paddingTop: 6 },
+  bar: {
+    flexDirection: 'row',
+    backgroundColor: HEADER_BG,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+    paddingHorizontal: 8,
+    paddingTop: 6,
+  },
   tab: { paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 3, borderBottomColor: 'transparent' },
-  tabActive: { borderBottomColor: ORANGE },
-  tabText: { color: '#B9BCC8', fontWeight: '700' },
-  tabTextActive: { color: '#fff' },
+  tabActive: { borderBottomColor: ACCENT },
+  tabText: { color: MUTED, fontWeight: '700' },
+  tabTextActive: { color: BRAND },
 });

@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend-web",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "cd /d D:\\newdata\\grd_job_scan\\grd_job_scan\\frontend && npx expo start --web -c --port 8090"
+      ],
+      "port": 8090
+    }
+  ]
+}

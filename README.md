@@ -1,4 +1,4 @@
-# GRD Job Scan
+# Job Scan
 
 `grd_job_scan` is an Expo Go + Python document scanning MVP.
 

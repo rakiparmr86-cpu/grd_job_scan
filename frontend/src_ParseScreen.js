@@ -10,16 +10,18 @@ import {
   View,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { parseFile, exportWordDoc } from './src_api';
-import { shareWordFile } from './src_share';
+import { parseFile, exportDocument } from './src_api';
+import { shareExportedFile } from './src_share';
+import FormatPicker from './src_FormatPicker';
 
 const BRAND = '#2C2E3E';
-const ORANGE = '#F58220';
+const ACCENT = '#5B6472';
 
 export default function ParseScreen() {
   const [language, setLanguage] = useState('eng');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [format, setFormat] = useState('word');
 
   const pickAndParse = async () => {
     try {
@@ -46,15 +48,15 @@ export default function ParseScreen() {
     }
   };
 
-  const exportWord = async () => {
+  const exportDoc = async () => {
     if (!result?.text.trim()) return;
     setBusy(true);
     try {
-      const title = result.filename.replace(/\.[^.]+$/, '') || 'GRD Job Scan';
-      const data = await exportWordDoc(title, [{ scan_id: 'parsed', text: result.text }]);
-      await shareWordFile(data);
+      const title = result.filename.replace(/\.[^.]+$/, '') || 'Job Scan';
+      const data = await exportDocument(title, [{ scan_id: 'parsed', text: result.text }], format);
+      await shareExportedFile(data);
     } catch (error) {
-      Alert.alert('Export failed', error.message || 'Could not export Word document.');
+      Alert.alert('Export failed', error.message || 'Could not export the document.');
     } finally {
       setBusy(false);
     }
@@ -114,8 +116,10 @@ export default function ParseScreen() {
             style={styles.editor}
             placeholder="No text found in this file."
           />
+          <Text style={styles.label}>Export format</Text>
+          <FormatPicker value={format} onChange={setFormat} />
           <Pressable
-            onPress={exportWord}
+            onPress={exportDoc}
             disabled={busy || !result.text.trim()}
             style={({ pressed }) => [
               styles.button,
@@ -123,7 +127,7 @@ export default function ParseScreen() {
               pressed && { opacity: 0.82 },
             ]}
           >
-            <Text style={styles.buttonText}>Create & Share Word (.docx)</Text>
+            <Text style={styles.buttonText}>Create & Share {format === 'pdf' ? 'PDF' : 'Word (.docx)'}</Text>
           </Pressable>
         </View>
       )}
@@ -151,7 +155,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     minHeight: 48,
     borderRadius: 12,
-    backgroundColor: ORANGE,
+    backgroundColor: ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
   },

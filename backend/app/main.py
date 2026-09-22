@@ -3,7 +3,8 @@ from __future__ import annotations
 import io
 import uuid
 from pathlib import Path
-from typing import List
+from typing import List, Literal
+from xml.sax.saxutils import escape as xml_escape
 
 import cv2
 import numpy as np
@@ -14,6 +15,10 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import cm
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
 
 from app.auth import current_user, router as auth_router
 
@@ -28,7 +33,7 @@ SCAN_DIR.mkdir(parents=True, exist_ok=True)
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
-    title="GRD Job Scan API",
+    title="Job Scan API",
     version="1.0.0",
     description="Document scanning, enhancement, OCR and Word export API.",
 )
@@ -50,8 +55,15 @@ class ExportPage(BaseModel):
 
 
 class ExportRequest(BaseModel):
-    title: str = "GRD Job Scan"
+    title: str = "Job Scan"
     pages: List[ExportPage]
+    format: Literal["word", "pdf"] = "word"
+
+
+EXPORT_MEDIA_TYPES = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pdf": "application/pdf",
+}
 
 
 def order_points(pts: np.ndarray) -> np.ndarray:
@@ -295,45 +307,96 @@ def delete_scan(scan_id: str, user: str = Depends(current_user)):
     return {"deleted": True, "scan_id": scan_id}
 
 
-@app.post("/api/export-word")
-def export_word(request: ExportRequest, user: str = Depends(current_user)):
-    if not request.pages:
-        raise HTTPException(status_code=400, detail="At least one page is required.")
+def split_chunks(text: str) -> List[str]:
+    chunks = [p.strip() for p in text.replace("\r\n", "\n").split("\n\n") if p.strip()]
+    if not chunks and text.strip():
+        chunks = [text.strip()]
+    return chunks
 
+
+def build_word(path: Path, title: str, pages: List[ExportPage]) -> None:
     document = Document()
-    document.core_properties.title = request.title
+    document.core_properties.title = title
 
     normal = document.styles["Normal"]
     normal.font.name = "Arial"
     normal.font.size = Pt(11)
 
-    document.add_heading(request.title, level=1)
+    document.add_heading(title, level=1)
 
-    for index, page in enumerate(request.pages, start=1):
-        if len(request.pages) > 1:
+    for index, page in enumerate(pages, start=1):
+        if len(pages) > 1:
             document.add_heading(f"Page {index}", level=2)
 
         # Keep output editable: OCR text is inserted as real Word paragraphs.
-        chunks = [p.strip() for p in page.text.replace("\r\n", "\n").split("\n\n") if p.strip()]
-        if not chunks and page.text.strip():
-            chunks = [page.text.strip()]
-
-        for chunk in chunks:
+        for chunk in split_chunks(page.text):
             document.add_paragraph(chunk)
 
-        if index < len(request.pages):
+        if index < len(pages):
             document.add_page_break()
+
+    document.save(path)
+
+
+def build_pdf(path: Path, title: str, pages: List[ExportPage]) -> None:
+    doc = SimpleDocTemplate(
+        str(path),
+        pagesize=A4,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+        leftMargin=2 * cm,
+        rightMargin=2 * cm,
+        title=title,
+    )
+    styles = getSampleStyleSheet()
+    story = [Paragraph(xml_escape(title), styles["Title"]), Spacer(1, 14)]
+
+    for index, page in enumerate(pages, start=1):
+        if len(pages) > 1:
+            story.append(Paragraph(f"Page {index}", styles["Heading2"]))
+            story.append(Spacer(1, 6))
+
+        for chunk in split_chunks(page.text):
+            # Paragraph markup treats text as mini-HTML: escape it, then turn
+            # real line breaks back into <br/> so multi-line OCR text wraps.
+            safe = xml_escape(chunk).replace("\n", "<br/>")
+            story.append(Paragraph(safe, styles["BodyText"]))
+            story.append(Spacer(1, 8))
+
+        if index < len(pages):
+            story.append(PageBreak())
+
+    doc.build(story)
+
+
+@app.post("/api/export")
+def export_document(request: ExportRequest, user: str = Depends(current_user)):
+    if not request.pages:
+        raise HTTPException(status_code=400, detail="At least one page is required.")
 
     export_id = str(uuid.uuid4())
     safe_name = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in request.title).strip()
-    safe_name = safe_name or "GRD_Job_Scan"
-    filename = f"{safe_name}_{export_id[:8]}.docx"
-    path = EXPORT_DIR / filename
-    document.save(path)
+    safe_name = safe_name or "Job_Scan"
+
+    if request.format == "pdf":
+        filename = f"{safe_name}_{export_id[:8]}.pdf"
+        path = EXPORT_DIR / filename
+        try:
+            build_pdf(path, request.title, request.pages)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"PDF export failed: {exc}") from exc
+    else:
+        filename = f"{safe_name}_{export_id[:8]}.docx"
+        path = EXPORT_DIR / filename
+        try:
+            build_word(path, request.title, request.pages)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Word export failed: {exc}") from exc
 
     return {
         "export_id": export_id,
         "filename": filename,
+        "format": request.format,
         "download_url": f"/api/exports/{filename}",
     }
 
@@ -343,8 +406,5 @@ def download_export(filename: str):
     safe_path = EXPORT_DIR / Path(filename).name
     if not safe_path.exists():
         raise HTTPException(status_code=404, detail="Export not found.")
-    return FileResponse(
-        safe_path,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=safe_path.name,
-    )
+    media_type = EXPORT_MEDIA_TYPES.get(safe_path.suffix.lower(), "application/octet-stream")
+    return FileResponse(safe_path, media_type=media_type, filename=safe_path.name)

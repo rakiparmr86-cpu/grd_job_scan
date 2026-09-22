@@ -2,13 +2,22 @@ import { Alert, Platform } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { API_BASE_URL } from './src_config';
 
-const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const MIME_BY_EXT = {
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pdf: 'application/pdf',
+};
+const UTI_BY_EXT = {
+  docx: 'org.openxmlformats.wordprocessingml.document',
+  pdf: 'com.adobe.pdf',
+};
 
-// data: response of /api/export-word ({ filename, download_url }).
-// Downloads the .docx to the app cache and opens the share sheet (Word, Drive, WhatsApp...).
-export async function shareWordFile(data) {
+// data: response of /api/export ({ filename, format, download_url }).
+// Downloads the file to the app cache and opens the share sheet (Word/Adobe, Drive, WhatsApp...).
+export async function shareExportedFile(data) {
   const fileUrl = `${API_BASE_URL}${data.download_url}`;
-  const localName = data.filename || `grd-job-scan-${Date.now()}.docx`;
+  const localName = data.filename || `job-scan-${Date.now()}.${data.format === 'pdf' ? 'pdf' : 'docx'}`;
+  const ext = (localName.split('.').pop() || 'docx').toLowerCase();
+  const mimeType = MIME_BY_EXT[ext] || 'application/octet-stream';
 
   if (Platform.OS === 'web') {
     window.open(fileUrl, '_blank');
@@ -25,8 +34,8 @@ export async function shareWordFile(data) {
   }
 
   await Sharing.shareAsync(downloaded.uri, {
-    mimeType: DOCX_MIME,
-    dialogTitle: 'Share GRD Job Scan Word file',
-    UTI: 'org.openxmlformats.wordprocessingml.document',
+    mimeType,
+    dialogTitle: `Share Job Scan ${ext.toUpperCase()} file`,
+    UTI: UTI_BY_EXT[ext],
   });
 }
