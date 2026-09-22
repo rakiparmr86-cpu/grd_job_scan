@@ -1,0 +1,8 @@
+Starting project at D:\newdata\grd_job_scan\grd_job_scan\frontend
+Starting Metro Bundler
+
+warning: Bundler cache is empty, rebuilding (this may take a minute)
+Waiting on http://localhost:8081
+
+1 package may need updating. Run npx expo install --check for details.
+Logs for your project will appear below.

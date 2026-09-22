@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { API_BASE_URL } from './src_config';
 
 let authToken = null;
@@ -72,17 +73,21 @@ async function fileForm(file, language) {
   const form = new FormData();
   form.append('language', language);
 
-  // On web, expo-image-picker / expo-document-picker give a real browser File
-  // in `file.file`; fetch's FormData needs that Blob/File directly, not the
-  // {uri, type, name} descriptor React Native's native FormData accepts.
-  if (file.file) {
-    form.append('file', file.file, file.fileName || file.name || file.file.name);
-  } else if (typeof file.uri === 'string' && /^(blob|data):/.test(file.uri)) {
-    // Web only: expo-image-manipulator (crop) output has no `.file`, just a
-    // blob:/data: URI. Fetching it in-page gives back the real Blob to upload.
-    const blob = await fetch(file.uri).then((r) => r.blob());
-    form.append('file', blob, file.fileName || file.name || `upload-${Date.now()}.jpg`);
+  if (Platform.OS === 'web') {
+    if (file.file) {
+      // Real picker asset: a browser File object, which fetch's FormData needs directly.
+      form.append('file', file.file, file.fileName || file.name || file.file.name);
+    } else {
+      // expo-image-manipulator (crop) output on web has no `.file`, just a
+      // blob:/data: URI. Fetching it in-page gives back the real Blob to upload.
+      const blob = await fetch(file.uri).then((r) => r.blob());
+      form.append('file', blob, file.fileName || file.name || `upload-${Date.now()}.jpg`);
+    }
   } else {
+    // Native: EXPO_PUBLIC_USE_RN_FETCH=1 (see .env) keeps React Native's own
+    // fetch, which reads local file:// / content:// URIs correctly and
+    // accepts this classic {uri, type, name} upload descriptor. Expo SDK 57's
+    // newer built-in fetch does not support this shape for native uploads.
     form.append('file', {
       uri: file.uri,
       type: file.mimeType || 'application/octet-stream',

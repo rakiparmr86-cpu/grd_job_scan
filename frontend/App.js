@@ -172,7 +172,7 @@ function ScanScreen() {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>1. Add document pages</Text>
+            <Text style={styles.sectionTitle}>1. Add document pages1</Text>
             <Text style={styles.help}>
               Take a photo or import one. The backend automatically finds the document,
               corrects perspective, improves readability and extracts editable text.
